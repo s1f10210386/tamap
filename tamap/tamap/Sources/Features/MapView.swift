@@ -35,6 +35,8 @@ struct Spot: Identifiable {
 }
 
 struct MapView: View {
+    @EnvironmentObject var appState: AppState
+    @State private var mapSearchText: String = ""
     // 中央は多摩動物公園周辺
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 35.6467, longitude: 139.4353),
@@ -50,16 +52,17 @@ struct MapView: View {
             (0.003, 0.001), ( -0.002, 0.002), (0.0015, -0.0015), ( -0.003, -0.0005), (0.0025, 0.003)
         ]
         let samplePosts = [
-            "楽しかったー",
+            "楽しかったー！ #子連れ",
             "自然を満喫できた！都会では味わえない！",
             "また来たいなー",
-            "子供がすごい喜んでた、また行きたいです！",
+            "子供がすごい元気になった、また行きたいです！",
             "写真映えスポットって感じで一人でも寄りやすかった！"
         ]
         for i in 0..<postOffsets.count {
             let lat = baseLat + postOffsets[i].0
             let lon = baseLon + postOffsets[i].1
-            let likes = Int.random(in: 1...200)
+            // ひとつだけいいね0のダミーを作る（見た目用）
+            let likes = (i == 0) ? 0 : Int.random(in: 1...200)
             list.append(Spot(title: "投稿Spot\(i+1)", coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon), isFromAPI: false, likes: likes, post: samplePosts[i % samplePosts.count], category: .post))
         }
 
@@ -226,7 +229,7 @@ struct MapView: View {
 
                         // ポップアップ（選択時のみ表示）: マーカーの上に重ねる
                         if selectedSpotID == spot.id {
-                            VStack(spacing: 4) {
+                            VStack(spacing: 6) {
                                 if let postText = spot.post {
                                     Text(postText)
                                         .font(.caption)
@@ -237,12 +240,34 @@ struct MapView: View {
                                         .font(.caption)
                                         .foregroundColor(.white)
                                 }
+
+                                // 見た目だけのいいねボタン（ハリボテ）
+                                HStack(spacing: 8) {
+                                    Button(action: {
+                                        // 見た目だけのダミー。実際のいいねは変わりません。
+                                    }) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: spot.likes > 0 ? "heart.fill" : "heart")
+                                                .foregroundColor(spot.likes > 0 ? .red : .white)
+                                                .font(.caption)
+                                            Text("\(spot.likes)")
+                                                .font(.caption2)
+                                                .foregroundColor(.white)
+                                        }
+                                        .padding(6)
+                                        .background(Color.black.opacity(0.12))
+                                        .cornerRadius(8)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+
+                                    Spacer()
+                                }
                             }
                             .padding(8)
                             .background(Color.green)
                             .cornerRadius(8)
                             .shadow(radius: 4)
-                            .offset(y: -40) // マーカーの上に表示する
+                            .offset(y: -48) // マーカーの上に表示する（少し上に）
                             .zIndex(1)
                             // タップで閉じるのを許可
                             .onTapGesture {
@@ -252,10 +277,40 @@ struct MapView: View {
                     }
                 }
             }
-            .navigationTitle("たまっぷ")
-            .ignoresSafeArea(edges: .bottom)
+            .ignoresSafeArea()
+            .navigationBarHidden(true)
+            // ZStack の背景を透明にしてグレーっぽい透過色が出ないようにする
+            .background(Color.clear)
 
-            // フィルタUI（画面下に重ねる）
+            // 上部に透明な検索バーをオーバーレイ
+            VStack(spacing: 8) {
+                HStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                        TextField("スポットを検索...", text: $mapSearchText)
+                            .foregroundColor(.primary)
+                    }
+                    .padding(12)
+                    .background(Color.white)
+                    .cornerRadius(16)
+                    .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 3)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.gray.opacity(0.12), lineWidth: 1)
+                    )
+
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 70) // 少し下げる
+                .padding(.bottom, 4)
+
+                Spacer()
+            }
+            .ignoresSafeArea(edges: .top)
+
+            // フィルタUI（画面下部に配置） — 背景を透明に
             VStack {
                 Spacer()
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -263,7 +318,7 @@ struct MapView: View {
                         ForEach(Filter.allCases) { filter in
                             Button {
                                 withAnimation { selectedFilter = filter }
-                                // 選択フィルタを変えたら選択中の注釈を閉じる
+                                // 選択時はポップアップを閉じる
                                 selectedSpotID = nil
                             } label: {
                                 Text(filter.rawValue)
@@ -283,12 +338,34 @@ struct MapView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
-                .background(VisualEffectBlur(blurStyle: .systemThinMaterial))
+                .background(Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 16)
                 .padding(.bottom, 70)
             }
-        }
+         }
+         .font(.custom("Hiragino Maru Gothic ProN", size: 16))
+         .onChange(of: appState.showMap) { show in
+             // SearchViewからMapに遷移したいリクエストが来た場合
+             guard show else { return }
+             // フォーカス名が渡されている場合、該当するスポットの中心に合わせてズーム
+             if let names = appState.mapFocusNames, !names.isEmpty {
+                 // 該当スポットのうち最初のものにフォーカス
+                 if let first = spots.first(where: { names.contains($0.title) || names.contains($0.post ?? "") }) {
+                     withAnimation {
+                         region.center = first.coordinate
+                         region.span = MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                     }
+                     // そのスポットを選択状態にする
+                     selectedSpotID = first.id
+                 }
+             }
+             // 処理が終わったらフラグをクリア
+             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                 appState.showMap = false
+                 appState.mapFocusNames = nil
+             }
+         }
     }
 }
 
@@ -313,7 +390,7 @@ struct Triangle: Shape {
 struct MarkerBubble: View {
     var count: Int
     var color: Color = .blue
-    
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
@@ -328,7 +405,7 @@ struct MarkerBubble: View {
             .background(color)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .shadow(radius: 1)
-            
+
             Triangle()
                 .fill(color)
                 .frame(width: 14, height: 8)

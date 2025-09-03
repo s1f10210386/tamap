@@ -8,14 +8,14 @@
 import SwiftUI
 
 struct TabBarView: View {
-    @State private var selectedTab = 0
+    @EnvironmentObject var appState: AppState
     @State private var showingPostView = false
     
     var body: some View {
         ZStack {
             // メインコンテンツ
             Group {
-                switch selectedTab {
+                switch appState.selectedTab {
                 case 0:
                     HomeView()
                 case 1:
@@ -31,8 +31,9 @@ struct TabBarView: View {
             
             VStack {
                 Spacer()
-                CustomTabBar(selectedTab: $selectedTab, showingPostView: $showingPostView)
+                CustomTabBar(selectedTab: $appState.selectedTab, showingPostView: $showingPostView)
             }
+            .offset(y: 10)
             .ignoresSafeArea(.all, edges: .bottom)
         }
         .sheet(isPresented: $showingPostView) {
